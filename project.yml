@@ -1,0 +1,38 @@
+name: Nit
+
+options:
+  bundleIdPrefix: com.numan
+  deploymentTarget:
+    macOS: "13.0"
+  createIntermediateGroups: true
+
+targets:
+  Nit:
+    type: application
+    platform: macOS
+    sources:
+      - path: Sources
+    info:
+      path: Info.plist
+      properties:
+        CFBundleName: Nit
+        CFBundleDisplayName: Nit
+        CFBundleShortVersionString: "1.0"
+        CFBundleVersion: "1"
+        LSUIElement: true                # menu-bar agent: no Dock icon / main window
+        LSMinimumSystemVersion: "13.0"
+        NSAppTransportSecurity:          # allow plain-http :8001 discovery + self-signed wss :8002
+          NSAllowsArbitraryLoads: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.numan.nit
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        ENABLE_HARDENED_RUNTIME: YES
+        # NOTE: no entitlements file is declared on purpose -> App Sandbox is OFF.
+        # A sandboxed app cannot create the global CGEventTap, so do NOT add the
+        # "App Sandbox" capability in Xcode.
+        CODE_SIGN_STYLE: Automatic
+        # Set your Team ID so signing is stable and Accessibility / Launch-at-Login
+        # permissions persist across rebuilds.
+        # DEVELOPMENT_TEAM: ABCDE12345

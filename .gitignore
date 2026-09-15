@@ -1,0 +1,18 @@
+# macOS
+.DS_Store
+
+# Xcode — the project is generated from project.yml (xcodegen generate)
+Nit.xcodeproj/
+xcuserdata/
+*.xcuserstate
+
+# Local config
+.claude/
+
+# Local tokens persisted by the app
+.nit_token
+.nit_ip_token
+
+# Build outputs
+build/
+DerivedData/
