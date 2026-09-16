@@ -824,38 +824,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.removeAllItems()
 
-        let header = NSMenuItem(title: statusString(), action: nil, keyEquivalent: "")
-        header.isEnabled = false
-        menu.addItem(header)
+        let vol = remote.volume ?? UserDefaults.standard.integer(forKey: "nit_volume")
+        let br = remote.backlight ?? UserDefaults.standard.integer(forKey: "nit_backlight")
+        let (volRow, volSl, volLab) = menuSliderRow(
+            icon: "speaker.wave.2.fill", min: NitRemote.volumeMin, max: NitRemote.volumeMax,
+            value: vol, action: #selector(volumeSliderChanged(_:)))
+        menuVolumeSlider = volSl
+        menuVolumeLabel = volLab
+        let volItem = NSMenuItem()
+        volItem.view = volRow
+        menu.addItem(volItem)
 
+        let (briRow, briSl, briLab) = menuSliderRow(
+            icon: "sun.max.fill", min: NitRemote.backlightMin, max: NitRemote.backlightMax,
+            value: br, action: #selector(brightnessSliderChanged(_:)))
+        menuBrightnessSlider = briSl
+        menuBrightnessLabel = briLab
+        let briItem = NSMenuItem()
+        briItem.view = briRow
+        menu.addItem(briItem)
+
+        menu.addItem(.separator())
+
+        // Untrusted is an actionable error state, so it stays at the top level where the
+        // submenu can't hide it.
         let trusted = AXIsProcessTrusted()
-        let fwd = NSMenuItem(title: "Forward volume & brightness keys to the monitor", action: #selector(toggleForwarding), keyEquivalent: "")
-        fwd.state = (forwardingEnabled && trusted) ? .on : .off
-        fwd.target = self
-        menu.addItem(fwd)
         if !trusted {
             let warn = NSMenuItem(title: "Grant Accessibility to capture keys…", action: #selector(openAccessibility), keyEquivalent: "")
             warn.target = self
             menu.addItem(warn)
         }
 
-        menu.addItem(.separator())
+        let details = NSMenu()
+        let detailsItem = NSMenuItem(title: "Details", action: nil, keyEquivalent: "")
+        detailsItem.submenu = details
+        menu.addItem(detailsItem)
+
+        let header = NSMenuItem(title: statusString(), action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        details.addItem(header)
+
+        let fwd = NSMenuItem(title: "Forward volume & brightness keys to the monitor", action: #selector(toggleForwarding), keyEquivalent: "")
+        fwd.state = (forwardingEnabled && trusted) ? .on : .off
+        fwd.target = self
+        details.addItem(fwd)
+
+        details.addItem(.separator())
         let actions: [(String, Selector)] = [
             ("Mute (toggle)", #selector(mute)), ("Unmute", #selector(unmute)),
         ]
         for (t, sel) in actions {
             let it = NSMenuItem(title: t, action: sel, keyEquivalent: ""); it.target = self
-            menu.addItem(it)
+            details.addItem(it)
         }
 
         // Nav / Remote Mode. Key equivalents are display-only: an LSUIElement app has no
         // main menu so they never fire on their own, and the tap swallows the combos first.
-        menu.addItem(.separator())
+        details.addItem(.separator())
         let rm = NSMenuItem(title: "Remote Mode", action: #selector(toggleRemoteModeMenu), keyEquivalent: "r")
         rm.keyEquivalentModifierMask = [.control, .option]
         rm.state = remoteModeActive ? .on : .off
         rm.target = self
-        menu.addItem(rm)
+        details.addItem(rm)
         let nav: [(String, String, Selector)] = [
             ("OK", "\r", #selector(okPress)), ("Back", "\u{8}", #selector(backPress)),
             ("Home", "h", #selector(homePress)), ("Monitor Power", "p", #selector(powerToggle)),
@@ -864,27 +894,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let it = NSMenuItem(title: t, action: sel, keyEquivalent: ke)
             it.keyEquivalentModifierMask = [.control, .option]
             it.target = self
-            menu.addItem(it)
+            details.addItem(it)
         }
 
         // Launch-at-Login and Auto-wake now live only in Settings.
-        menu.addItem(.separator())
+        details.addItem(.separator())
         let rescan = NSMenuItem(title: "Rescan for monitor", action: #selector(rescan), keyEquivalent: "")
         rescan.target = self
-        menu.addItem(rescan)
+        details.addItem(rescan)
+        let about = NSMenuItem(title: "About Nit", action: #selector(showAbout), keyEquivalent: "")
+        about.target = self
+        details.addItem(about)
+
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.keyEquivalentModifierMask = [.command]     // display-only, like the nav items
         settings.target = self
         menu.addItem(settings)
-        let about = NSMenuItem(title: "About Nit", action: #selector(showAbout), keyEquivalent: "")
-        about.target = self
-        menu.addItem(about)
         let q = NSMenuItem(title: "Quit", action: #selector(quit), keyEquivalent: "q")
         q.target = self
         menu.addItem(q)
 
         applyLevelViews()
         if settingsWindow?.isVisible == true { refreshSettingsUI() }
+    }
+
+    /// Slider row used as an `NSMenuItem.view`. The menu lays these out from the view's
+    /// frame rather than constraints, so the row carries an explicit size.
+    private func menuSliderRow(icon: String, min lo: Int, max hi: Int, value: Int,
+                               action: Selector) -> (NSView, NSSlider, NSTextField) {
+        let image = NSImageView()
+        image.image = NSImage(systemSymbolName: icon, accessibilityDescription: nil)
+        image.image?.isTemplate = true
+        image.contentTintColor = .secondaryLabelColor
+        image.translatesAutoresizingMaskIntoConstraints = false
+        image.widthAnchor.constraint(equalToConstant: 16).isActive = true
+        image.heightAnchor.constraint(equalToConstant: 16).isActive = true
+
+        let sl = NSSlider(value: Double(value), minValue: Double(lo), maxValue: Double(hi),
+                          target: self, action: action)
+        sl.isContinuous = true
+        sl.translatesAutoresizingMaskIntoConstraints = false
+        sl.widthAnchor.constraint(equalToConstant: 150).isActive = true
+
+        let lab = NSTextField(labelWithString: "")
+        lab.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .medium)
+        lab.textColor = .secondaryLabelColor
+        lab.translatesAutoresizingMaskIntoConstraints = false
+        lab.widthAnchor.constraint(equalToConstant: 44).isActive = true
+
+        let stack = NSStackView(views: [image, sl, lab])
+        stack.orientation = .horizontal
+        stack.alignment = .centerY
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 4, left: 14, bottom: 4, right: 12)
+        stack.translatesAutoresizingMaskIntoConstraints = true
+        stack.frame = NSRect(x: 0, y: 0, width: 252, height: 28)
+        return (stack, sl, lab)
     }
 
     private func applyLevelViews() {
