@@ -1,6 +1,6 @@
 # Samsung M9 / Tizen Remote — Protocol Notes
 
-Developer/tinkerer notes on how Nit talks to a Samsung Smart Monitor M9. Everything
+Developer/tinkerer notes on how Nit talks to a Samsung Smart Monitor. Everything
 here was proven empirically against real hardware. See [../README.md](../README.md) for the
 app overview.
 
@@ -119,7 +119,7 @@ the socket is up before it can deliver the power key.)
 
 No hardcoded IP — the monitor is found by sweep:
 
-1. Try the saved IP first (`m9_last_ip`).
+1. Try the saved IP first (`nit_last_ip`).
 2. Otherwise sweep the local **/24**: derive the base from the Mac's **en0/en1** IPv4 address
    (via `getifaddrs`), then probe `http://<base>.1..254:8001/api/v2/` in parallel.
 3. **Match Samsung Smart Monitor / TV in the raw response body.** Keywords: M7, M70,

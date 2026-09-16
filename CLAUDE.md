@@ -55,7 +55,7 @@ Mac by forwarding the keyboard's volume/mute keys over the monitor's Wi-Fi remot
 - Model: Samsung Smart Monitor M9 (32", Tizen). Replace `<MODEL_ID>` / `<INTERNAL_ID>`
   with your unit's values if you need them recorded.
 - IP: assigned by DHCP — the app auto-discovers, don't hardcode.
-- wifiMac: auto-captured from the `:8001/api/v2/` probe and persisted (`m9_wifi_mac`) for
+- wifiMac: auto-captured from the `:8001/api/v2/` probe and persisted (`nit_wifi_mac`) for
   Wake-on-LAN; you only need to copy it manually for a DHCP reservation or router WoL entry.
 - **Required setting for auto-wake:** turn ON **Settings > General > Network > Expert
   Settings > "Power On with Mobile"** — this keeps the NIC alive in standby so WoL and the
@@ -65,7 +65,7 @@ Mac by forwarding the keyboard's volume/mute keys over the monitor's Wi-Fi remot
 ## Architecture (`Sources/main.swift`, single file)
 
 - `NitRemote` — WebSocket client + discovery + reconnect + key sending + wake.
-  - Discovery (`probe`): try the saved IP (`UserDefaults` `m9_last_ip`); else sweep the local
+  - Discovery (`probe`): try the saved IP (`UserDefaults` `nit_last_ip`); else sweep the local
     /24 (subnet from `getifaddrs` on en0/en1) hitting `:8001/api/v2/` and matching the raw body
     against "M9" (the hit is in `device.name`, not the sales-code modelName). The probe also
     parses `wifiMac` + `PowerState` into `DeviceInfo`; `adopt` persists the MAC. Re-sweeps
@@ -81,7 +81,9 @@ Mac by forwarding the keyboard's volume/mute keys over the monitor's Wi-Fi remot
   writes ~120 ms. Menu and Settings both have sliders.
 - `mediaKeyCallback` — a `@convention(c)` CGEventTap callback. Mask = `NSSystemDefined`
   (type 14) **and** `keyDown`. Type 14 / subtype 8: keyCodes 0/1/7 = volume up/down/mute
-  and 2/3 = brightness up/down (gated by `forwardingEnabled`). `keyDown` also maps
+  and 2/3 = brightness up/down (gated by `forwardingEnabled` **and** a non-built-in
+  `NSScreen` via `CGDisplayIsBuiltin` — laptop-only, keys pass through so the Air
+  volume/brightness change; clamshell + monitor still forwards). `keyDown` also maps
   F1/F2, 145/144, and Logitech/external F14/F15 (107/113) to backlight. A HID tap
   plus the session tap swallows those before WindowServer dims the Air.
   `keyDown`: **⌃⌥ hotkeys** (always live) and, when Remote
@@ -94,7 +96,7 @@ Mac by forwarding the keyboard's volume/mute keys over the monitor's Wi-Fi remot
   Settings…; About Nit; Quit), creates the tap (always enabled once created —
   `forwardingEnabled` gates only the media-key branch, so hotkeys survive unticking
   Forward-keys), prompts for Accessibility. Menu-bar icon: `tv.and.hifispeaker.fill` normally
-  (fallback `display` → `speaker.wave.2.fill` → "M9" title), `av.remote.fill` in Remote Mode
+  (fallback `display` → `speaker.wave.2.fill` → "Nit" title), `av.remote.fill` in Remote Mode
   (fallback `dpad` → accent-tinted normal icon); template images so the bar tints them.
   Hotkeys: ⌃⌥ arrows/↩(OK)/⌫(Back)/H(Home)/P(smart power)/[/](brightness)/R(Remote Mode); menu key equivalents
   are display-only (an LSUIElement app has no main menu, and the tap swallows the combo first).

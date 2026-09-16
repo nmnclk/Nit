@@ -1,14 +1,14 @@
 # Nit — Setup Guide
 
-End-user setup for Nit, the macOS menu-bar app that drives a Samsung Smart Monitor M7
-/ M70D from the Mac keyboard. See [../README.md](../README.md) for the feature overview.
+End-user setup for Nit, the macOS menu-bar app that drives a Samsung Smart Monitor
+from the Mac keyboard. See [../README.md](../README.md) for the feature overview.
 
 ---
 
 ## 1. Prerequisites
 
 - **macOS 13 (Ventura) or later** — Launch at Login uses `SMAppService`, which is 13+ only.
-- **The M9 on the same /24 subnet as the Mac.** The app finds the monitor by sweeping the
+- **The monitor on the same /24 subnet as the Mac.** The app finds it by sweeping the
   local subnet; a different VLAN or a "guest" Wi-Fi that isolates clients will hide it.
 - **Build tools**, one of:
   - Xcode (full IDE), or
@@ -28,7 +28,7 @@ On the monitor, turn **ON**:
 Settings > General > Network > Expert Settings > "Power On with Mobile"
 ```
 
-**Why it matters.** The M9 has two sleep depths:
+**Why it matters.** The monitor has two sleep depths:
 
 - **Network standby** — the network chip stays powered. `http://<ip>:8001/api/v2/` still
   answers (so the app can read power state and MAC) and Wake-on-LAN works.
@@ -105,9 +105,10 @@ Two one-time prompts appear:
 ## 5. Verify it works
 
 - The menu-bar icon appears (a TV-and-speaker glyph). Click it — the header should read
-  **"M7 — connected (192.168.x.y)"** once discovery and pairing finish.
+  **"Monitor — connected (192.168.x.y)"** once discovery and pairing finish.
 - Press the keyboard's **volume up / down** and **mute** keys — the monitor's volume changes,
   and the Mac's own volume HUD does **not** appear (the event is swallowed).
+  Unplug the monitor (laptop display only) and the same keys drive the MacBook instead.
 - Menu > **Unmute** should reliably un-mute (it sends volume-up then volume-down; see the
   protocol notes — mute is toggle-only and its state can't be read back).
 
@@ -122,9 +123,11 @@ Two one-time prompts appear:
 - **Volume / Backlight sliders** — absolute volume 0–100 and panel backlight 0–50 (IP
   Control). Also in the menu-bar menu. Requires **IP Remote** on the monitor; first use
   may show **Allow**.
-- **Forward volume & brightness keys to M7** — turn key forwarding on/off. (Off still
-  leaves the ⌃⌥ hotkeys and Remote Mode working — only the media-key branch is gated.)
-- **Auto-wake monitor when the Mac wakes** — default **on**. Wakes the M9 at Mac-wake and
+- **Forward volume & brightness keys to the monitor** — turn key forwarding on/off. (Off still
+  leaves the ⌃⌥ hotkeys and Remote Mode working — only the media-key branch is gated.
+  Forwarding also pauses automatically when no external display is attached, so the
+  keys control the MacBook.)
+- **Auto-wake monitor when the Mac wakes** — default **on**. Wakes the monitor at Mac-wake and
   display-wake transitions only; the monitor still sleeps normally otherwise.
 - **Launch at Login** — default **on**. Registers the app as a login item on launch
   (needs the /Applications copy). Uncheck to stop.
@@ -151,11 +154,11 @@ Return / Esc drive the monitor directly (Esc = Back). Everything else types norm
 
 ## 7. Troubleshooting (deep)
 
-### Discovery: "M9 — searching…" never resolves
+### Discovery: "Monitor — searching…" never resolves
 
-- The app first tries the **saved IP** (`m9_last_ip`), then sweeps the whole local **/24**
+- The app first tries the **saved IP** (`nit_last_ip`), then sweeps the whole local **/24**
   (addresses `.1`–`.254`), hitting `http://<candidate>:8001/api/v2/` and matching the raw
-  response body for "M9". Confirm the Mac and monitor are on the **same subnet** — a sweep of
+  response body for Samsung Smart Monitor / TV. Confirm the Mac and monitor are on the **same subnet** — a sweep of
   `192.168.1.x` will never reach a monitor on `192.168.0.x` or on an isolating guest network.
 - The subnet is derived from the Mac's **en0/en1** IPv4 address. On an unusual interface
   (USB Ethernet dongle, etc.) discovery may not run — connect the Mac via Wi-Fi/en0.
@@ -169,7 +172,7 @@ Return / Esc drive the monitor directly (Esc = Back). Everything else types norm
   so neither Wake-on-LAN nor the `:8001` probe reach the monitor. Turn the setting on
   (Section 2).
 - **No MAC captured yet.** Wake-on-LAN needs the monitor's Wi-Fi MAC, which is learned from a
-  successful `:8001` probe and persisted as `m9_wifi_mac`. If the app has never reached the
+  successful `:8001` probe and persisted as `nit_wifi_mac`. If the app has never reached the
   monitor while it was awake, it has no MAC to target — connect once while the monitor is on,
   then MAC-based wake works thereafter.
 - **Wake-on-LAN blocked by the network.** The app sends the magic packet to both the global

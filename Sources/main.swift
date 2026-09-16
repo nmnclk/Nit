@@ -577,7 +577,7 @@ private func mediaKeyCallback(proxy: CGEventTapProxy, type: CGEventType,
         return Unmanaged.passUnretained(event)
     }
 
-    if type.rawValue == 14, app.forwardingEnabled,              // 14 == NSSystemDefined
+    if type.rawValue == 14, app.forwardingEnabled, app.hasExternalDisplay,  // 14 == NSSystemDefined
        let ns = NSEvent(cgEvent: event), ns.subtype.rawValue == 8 {
         let data1 = ns.data1
         let keyCode = (data1 & 0xFFFF0000) >> 16
@@ -618,7 +618,8 @@ private func mediaKeyCallback(proxy: CGEventTapProxy, type: CGEventType,
             if type == .keyDown, app.handleHotkey(keyCode: keyCode, autorepeat: autorepeat) { return nil }
         } else if app.remoteModeActive, noRealMods {
             if type == .keyDown, app.handleRemoteKey(keyCode: keyCode, autorepeat: autorepeat) { return nil }
-        } else if app.forwardingEnabled, noRealMods, let delta = brightnessKeyDelta(keyCode) {
+        } else if app.forwardingEnabled, app.hasExternalDisplay, noRealMods,
+                  let delta = brightnessKeyDelta(keyCode) {
             if type == .keyDown, !autorepeat { app.beginLevelHold(.backlight, delta: delta) }
             else if type == .keyUp { app.endLevelHold(.backlight) }
             return nil
@@ -645,6 +646,7 @@ enum LevelKind { case volume, backlight }
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let remote = NitRemote()
     var forwardingEnabled = true
+    private(set) var hasExternalDisplay = false  // laptop-only → let keys reach the Air
     var remoteModeActive = false               // not persisted; starts off each launch
     private var holdKind: LevelKind?
     private var holdDelta = 0
@@ -702,6 +704,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             try? SMAppService.mainApp.register()
         }
         setupMenu()
+        NSApp.applicationIconImage = Self.appIconImage()
         remote.onUpdate = { [weak self] in self?.refreshMenu() }
         remote.start()
 
@@ -730,8 +733,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let nc = NSWorkspace.shared.notificationCenter
         nc.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main, using: onWake)
         nc.addObserver(forName: NSWorkspace.screensDidWakeNotification, object: nil, queue: .main, using: onWake)
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didChangeScreenParametersNotification,
+            object: nil, queue: .main
+        ) { [weak self] _ in self?.refreshExternalDisplay() }
+        refreshExternalDisplay()
 
         refreshMenu()
+    }
+
+    /// Swallow volume/brightness only while a non-built-in screen is attached.
+    /// Clamshell + monitor still forwards; unplugged laptop uses the Air.
+    private func refreshExternalDisplay() {
+        let attached = NSScreen.screens.contains { screen in
+            guard let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+                return false
+            }
+            return CGDisplayIsBuiltin(num.uint32Value) == 0
+        }
+        if hasExternalDisplay && !attached { endAllLevelHolds() }
+        hasExternalDisplay = attached
     }
 
     // Menu --------------------------------------------------------------------
@@ -763,7 +784,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             button.image = img
             button.contentTintColor = remoteModeActive ? .controlAccentColor : nil
         } else {
-            button.title = "M7"
+            button.title = "Nit"
         }
     }
 
@@ -780,9 +801,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Menu-header / Settings status string. Shared so both surfaces read identically.
     private func statusString() -> String {
-        if let ip = remote.ip { return remote.connected ? "M7 — connected (\(ip))" : "M7 — \(ip) (offline)" }
-        if remote.lastSweepFailed { return "M7 — not found on this Wi‑Fi" }
-        return "M7 — searching…"
+        if let ip = remote.ip { return remote.connected ? "Monitor — connected (\(ip))" : "Monitor — \(ip) (offline)" }
+        if remote.lastSweepFailed { return "Monitor — not found on this Wi‑Fi" }
+        return "Monitor — searching…"
     }
 
     private func isTrackingSliders() -> Bool {
@@ -808,7 +829,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         menu.addItem(header)
 
         let trusted = AXIsProcessTrusted()
-        let fwd = NSMenuItem(title: "Forward volume & brightness keys to M7", action: #selector(toggleForwarding), keyEquivalent: "")
+        let fwd = NSMenuItem(title: "Forward volume & brightness keys to the monitor", action: #selector(toggleForwarding), keyEquivalent: "")
         fwd.state = (forwardingEnabled && trusted) ? .on : .off
         fwd.target = self
         menu.addItem(fwd)
@@ -1115,7 +1136,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ipRow.addArrangedSubview(applyIP)
 
         let hint = NSTextField(wrappingLabelWithString:
-            "The M70D must join the same Wi‑Fi as this Mac. USB‑C video alone is not enough.")
+            "The monitor must join the same Wi‑Fi as this Mac. USB‑C video alone is not enough.")
         hint.font = NSFont.systemFont(ofSize: NSFont.smallSystemFontSize)
         hint.textColor = .secondaryLabelColor
         hint.preferredMaxLayoutWidth = 320
@@ -1149,7 +1170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         slHint.textColor = .secondaryLabelColor
         slHint.preferredMaxLayoutWidth = 320
 
-        let fwd = NSButton(checkboxWithTitle: "Forward volume & brightness keys to M7",
+        let fwd = NSButton(checkboxWithTitle: "Forward volume & brightness keys to the monitor",
                            target: self, action: #selector(forwardCheckboxChanged(_:)))
         let aw = NSButton(checkboxWithTitle: "Auto-wake monitor when the Mac wakes",
                           target: self, action: #selector(autoWakeCheckboxChanged(_:)))
@@ -1224,14 +1245,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ]
         let credits = NSAttributedString(string:
             "Forwards the Mac keyboard's volume/mute and brightness keys, plus remote " +
-            "navigation, to a Samsung Smart Monitor M7 / M70D over Wi-Fi. Backlight uses " +
+            "navigation, to a Samsung Smart Monitor over Wi-Fi. Backlight uses " +
             "IP Control (IP Remote must be on).\n\n" +
             "⌃⌥←↑↓→ navigate · ⌃⌥↩ OK · ⌃⌥⌫ Back · ⌃⌥H Home · ⌃⌥P Power · ⌃⌥[ ] brightness · ⌃⌥R Remote Mode",
             attributes: attrs)
         NSApp.orderFrontStandardAboutPanel(options: [
             .credits: credits,
             .applicationName: "Nit",
+            .applicationIcon: Self.appIconImage(),
         ])
+    }
+
+    /// LSUIElement apps have no Dock icon, so the stock About panel would otherwise
+    /// show a generic placeholder. Load the bundled icns (asset-catalog AppIcon is
+    /// not always reachable via NSImage(named:)).
+    private static func appIconImage() -> NSImage {
+        if let url = Bundle.main.url(forResource: "AppIcon", withExtension: "icns"),
+           let img = NSImage(contentsOf: url) {
+            return img
+        }
+        let img = NSWorkspace.shared.icon(forFile: Bundle.main.bundlePath)
+        img.size = NSSize(width: 256, height: 256)
+        return img
     }
     /// Smart power: toggle over the live socket, else run the wake sequence (WoL + guarded
     /// power). Never queues KEY_POWER — see NitRemote.sendPowerIfConnected.
@@ -1341,7 +1376,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let mask = CGEventMask((1 << 14) | (1 << CGEventType.keyDown.rawValue) | (1 << CGEventType.keyUp.rawValue))
         // HID first: Logitech brightness is often F14/F15 or a consumer HID event that
         // WindowServer applies to the Air before a session tap sees it. Swallowing here
-        // keeps both keyboards on the M7. Session tap is the fallback for media keys.
+        // keeps both keyboards on the monitor. Session tap is the fallback for media keys.
         for location: CGEventTapLocation in [.cghidEventTap, .cgSessionEventTap] {
             guard let tap = CGEvent.tapCreate(
                 tap: location, place: .headInsertEventTap, options: .defaultTap,
