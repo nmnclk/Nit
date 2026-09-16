@@ -810,8 +810,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let sliders = [volumeSlider, brightnessSlider, menuVolumeSlider, menuBrightnessSlider,
                        hudVolumeSlider, hudBrightnessSlider]
         return sliders.contains { sl in
-            guard let sl else { return false }
-            return sl.window?.currentEvent?.type == .leftMouseDragged || (sl.cell?.isHighlighted ?? false)
+            // A slider in a closed menu or hidden window keeps its last highlighted state, so
+            // without the visibility check a stale cell would defer the HUD hide forever.
+            guard let sl, let win = sl.window, win.isVisible else { return false }
+            return win.currentEvent?.type == .leftMouseDragged || (sl.cell?.isHighlighted ?? false)
         }
     }
 
