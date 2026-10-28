@@ -76,6 +76,9 @@ Supported keys: `KEY_VOLUP`, `KEY_VOLDOWN`, `KEY_MUTE`, `KEY_LEFT`, `KEY_RIGHT`,
 - **Volume keys on this channel are relative only** (`KEY_VOLUP` / `KEY_VOLDOWN`).
   Absolute 0–100 volume is `directVolumeControl` on IP Control G2 (`:1516`), not here.
 - **`KEY_MUTE` is a toggle**, and the mute state **can't be read back** locally.
+  A send error never requeues this key: delivery may already have happened, so a
+  retry could reverse the toggle. A press while disconnected can wait for the
+  first connection, but is sent only once.
 - **"Force unmute" trick.** Because mute is toggle-only and unreadable, you can't
   unconditionally un-mute. The workaround: send `KEY_VOLUP` then `KEY_VOLDOWN` — net-zero on
   volume, but any volume key clears mute. (App inserts ~0.18 s between the two.)

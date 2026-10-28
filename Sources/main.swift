@@ -20,6 +20,11 @@
 import Cocoa
 import ServiceManagement
 
+private func nitDebug(_ message: @autoclosure () -> String) {
+    guard ProcessInfo.processInfo.environment["NIT_DEBUG"] == "1" else { return }
+    NSLog("[Nit debug] %@", message())
+}
+
 // MARK: - WebSocket remote + discovery ---------------------------------------
 
 final class NitRemote: NSObject, URLSessionWebSocketDelegate {
@@ -210,6 +215,7 @@ final class NitRemote: NSObject, URLSessionWebSocketDelegate {
 
     func connect() {
         guard !connected, !connecting, let ip = ip else { return }
+        nitDebug("WebSocket connecting")
         connecting = true
         let name64 = Data(Self.clientName.utf8).base64EncodedString()
         var urlStr = "wss://\(ip):8002/api/v2/channels/samsung.remote.control?name=\(name64)"
@@ -247,6 +253,7 @@ final class NitRemote: NSObject, URLSessionWebSocketDelegate {
                 try? FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: tokenURL.path)
             }
             connected = true; connecting = false; attempts = 0
+            nitDebug("WebSocket connected; queued keys: \(pending.count)")
             DispatchQueue.main.async { self.onUpdate?() }
             refreshLevels()
             let queued = pending; pending.removeAll()
@@ -257,6 +264,7 @@ final class NitRemote: NSObject, URLSessionWebSocketDelegate {
     }
 
     private func markDisconnected() {
+        nitDebug("WebSocket disconnected")
         connected = false; connecting = false; task = nil
         DispatchQueue.main.async { self.onUpdate?() }
         scheduleReconnect()
@@ -299,14 +307,19 @@ final class NitRemote: NSObject, URLSessionWebSocketDelegate {
 
     private func rawSend(_ key: String) {
         guard let task = task else { queue(key); connect(); return }
+        nitDebug("WebSocket SEND \(key)")
         task.send(.string(payload(key))) { [weak self] err in
+            nitDebug("WebSocket result \(key): \(err?.localizedDescription ?? "success")")
             guard err != nil, let self = self else { return }
-            self.queue(key)
+            // Delivery is uncertain after a send error; replaying a mute toggle
+            // could undo the user's action or keep retrying across reconnects.
+            if key != "KEY_MUTE" { self.queue(key) }
             DispatchQueue.main.async { self.markDisconnected() }
         }
     }
 
     private func queue(_ key: String) {
+        nitDebug("WebSocket QUEUE \(key)")
         if pending.count < 8 { pending.append(key) }
     }
 
@@ -374,11 +387,13 @@ final class NitRemote: NSObject, URLSessionWebSocketDelegate {
 
     private func intRPC(method: String, field: String, value: Int?, key: String,
                         retried: Bool = false, assign: @escaping (Int) -> Void) {
+        nitDebug("IP Control \(method): \(value.map(String.init) ?? "read")")
         withIPToken { [weak self] token in
             guard let self, let token else { return }
             var params: [String: Any] = ["AccessToken": token]
             if let value { params[field] = value }
             self.ipRPC(method, params: params) { result, err in
+                nitDebug("IP Control result \(method): value=\(Self.jsonInt(result?[field]).map(String.init) ?? "none") error=\(err.map(String.init) ?? "none")")
                 if err == -32010, !retried {
                     try? FileManager.default.removeItem(at: self.ipTokenURL)
                     self.intRPC(method: method, field: field, value: value, key: key, retried: true, assign: assign)
@@ -584,6 +599,7 @@ private func mediaKeyCallback(proxy: CGEventTapProxy, type: CGEventType,
         let keyState = (data1 & 0x0000FF00) >> 8                // 0x0A down
         let isRepeat = (data1 & 0x1) != 0
         if keyCode == 0 || keyCode == 1 || keyCode == 7 {       // up / down / mute
+            nitDebug("Media key \(keyCode): state=\(keyState) repeat=\(isRepeat)")
             if keyCode == 7 {
                 if keyState == 0x0A, !isRepeat { app.remote.send("KEY_MUTE") }
             } else if keyState == 0x0A, !isRepeat {
@@ -689,12 +705,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var hudBrightnessSlider: NSSlider?
     private var hudBrightnessLabel: NSTextField?
     private var levelHUD: NSPanel?
+    private var hudClickMonitor: Any?
+    private var hudDismissAfterClick = false
     private var hudHideTimer: Timer?
     private var hudKind: LevelKind?
     private var hudVolumeRow: NSView?
     private var hudBrightnessRow: NSView?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        nitDebug("Started pid=\(ProcessInfo.processInfo.processIdentifier)")
         UserDefaults.standard.register(defaults: [
             autoWakeKey: true, forwardKeysKey: true, launchAtLoginKey: true,
             "nit_backlight": 11, "nit_volume": 10,
@@ -807,13 +826,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func isTrackingSliders() -> Bool {
+        // A click on the nonactivating HUD can leave the cell highlighted after mouse-up.
+        // Highlight alone would then defer the hide forever, so the button has to be down.
+        guard NSEvent.pressedMouseButtons & 1 != 0 else { return false }
         let sliders = [volumeSlider, brightnessSlider, menuVolumeSlider, menuBrightnessSlider,
                        hudVolumeSlider, hudBrightnessSlider]
         return sliders.contains { sl in
             // A slider in a closed menu or hidden window keeps its last highlighted state, so
             // without the visibility check a stale cell would defer the HUD hide forever.
             guard let sl, let win = sl.window, win.isVisible else { return false }
-            return win.currentEvent?.type == .leftMouseDragged || (sl.cell?.isHighlighted ?? false)
+            return win.currentEvent?.type == .leftMouseDragged
+                || win.currentEvent?.type == .leftMouseDown
+                || (sl.cell?.isHighlighted ?? false)
         }
     }
 
@@ -1015,9 +1039,47 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         hudHideTimer = Timer.scheduledTimer(withTimeInterval: delay, repeats: false) { [weak self] _ in
             guard let self else { return }
             if self.isTrackingSliders() || self.holdKind != nil { self.scheduleHUDHide(after: 0.6); return }
+            // Pointer still over the panel. Dropping the timer here left the HUD up for good
+            // after a click; keep checking until the pointer leaves or a click dismisses it.
             if self.levelHUD?.isVisible == true, let hud = self.levelHUD,
-               hud.frame.contains(NSEvent.mouseLocation) { return }
-            self.levelHUD?.orderOut(nil)
+               hud.frame.contains(NSEvent.mouseLocation) {
+                self.scheduleHUDHide(after: 0.35)
+                return
+            }
+            self.dismissLevelHUD()
+        }
+    }
+
+    /// Keyboard HUD: a click should close it. The slider consumes mouse-up inside its
+    /// tracking loop, so the panel itself never sees that click — a local monitor does.
+    /// The slider's action may run before or after the deferred hide; both paths dismiss
+    /// instead of calling `showLevelHUD(linger:)`, which used to cancel the hide for good.
+    private func installHUDClickMonitor() {
+        guard hudClickMonitor == nil else { return }
+        hudClickMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseUp]) { [weak self] event in
+            guard let self, let hud = self.levelHUD, hud.isVisible, self.holdKind == nil else { return event }
+            let onHUD = event.window === hud || (event.window == nil && hud.frame.contains(NSEvent.mouseLocation))
+            guard onHUD || self.hudSliderIsHighlighted() else { return event }
+            self.hudDismissAfterClick = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self, self.hudDismissAfterClick else { return }
+                self.dismissLevelHUD()
+            }
+            return event
+        }
+    }
+
+    private func dismissLevelHUD() {
+        hudDismissAfterClick = false
+        guard holdKind == nil else { return }
+        hudHideTimer?.invalidate()
+        hudHideTimer = nil
+        levelHUD?.orderOut(nil)
+    }
+
+    private func hudSliderIsHighlighted() -> Bool {
+        [hudVolumeSlider, hudBrightnessSlider].contains { sl in
+            sl?.window?.isVisible == true && (sl?.cell?.isHighlighted ?? false)
         }
     }
 
@@ -1108,6 +1170,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fx.addTrackingArea(NSTrackingArea(rect: .zero,
                                           options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect],
                                           owner: self, userInfo: nil))
+        installHUDClickMonitor()
         return panel
     }
 
@@ -1141,11 +1204,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func brightDown() { remote.nudgeBacklight(-1) }
     @objc private func volumeSliderChanged(_ sender: NSSlider) {
         remote.setVolume(sender.integerValue)
-        if sender === hudVolumeSlider { showLevelHUD(.volume, linger: true) }
+        if sender === hudVolumeSlider { noteHUDSliderChange() }
     }
     @objc private func brightnessSliderChanged(_ sender: NSSlider) {
         remote.setBacklight(sender.integerValue)
-        if sender === hudBrightnessSlider { showLevelHUD(.backlight, linger: true) }
+        if sender === hudBrightnessSlider { noteHUDSliderChange() }
+    }
+
+    /// Drag keeps the keyboard HUD up. Releasing the click closes it — including when the
+    /// action runs after the monitor already hid the panel, which must not re-show it.
+    private func noteHUDSliderChange() {
+        let mouseUp = NSApp.currentEvent?.type == .leftMouseUp || hudDismissAfterClick
+        if mouseUp { dismissLevelHUD(); return }
+        showLevelHUD(hudKind, linger: true)
     }
     @objc private func okPress()   { remote.send("KEY_ENTER") }
     @objc private func backPress() { remote.send("KEY_RETURN") }

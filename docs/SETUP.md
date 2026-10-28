@@ -154,6 +154,24 @@ Return / Esc drive the monitor directly (Esc = Back). Everything else types norm
 
 ## 7. Troubleshooting (deep)
 
+### Mute icon reappears every few seconds
+
+The monitor can redisplay its mute indicator while sound is muted, even after
+Nit has quit. This does not mean Nit is sending repeated mute commands. To
+distinguish the two, quit Nit while the icon is recurring and check whether it
+continues. Menu > **Unmute**, followed by setting the volume slider to **0**, is
+an alternative way to silence the monitor without leaving its mute toggle on.
+
+For command diagnostics, quit Nit and launch it with:
+
+```sh
+open -n --env NIT_DEBUG=1 --stderr /tmp/nit-mute-debug.log /Applications/Nit.app
+```
+
+The log records media-key down/up events, outgoing WebSocket keys, connection
+changes, and IP Control level requests/results. It does not record access tokens.
+Quit and reopen Nit normally to disable diagnostic logging.
+
 ### Discovery: "Monitor — searching…" never resolves
 
 - The app first tries the **saved IP** (`nit_last_ip`), then sweeps the whole local **/24**
